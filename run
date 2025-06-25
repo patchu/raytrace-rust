@@ -1,0 +1,4 @@
+#!/bin/bash
+
+cargo run --release
+ffmpeg -framerate 30 -i output/frame_%03d.png -c:v libx264 -pix_fmt yuv420p out.mp4
