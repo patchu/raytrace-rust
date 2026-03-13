@@ -1,7 +1,8 @@
 use nalgebra::Vector3;
-use image::{Rgb, RgbImage};
+use image::{ImageBuffer, RgbImage};
 use std::f64::consts::PI;
-use std::io::{self, Write};
+use rayon::prelude::*;
+use indicatif::{ProgressBar, ProgressStyle, ParallelProgressIterator};
 
 type Vec3 = Vector3<f64>;
 
@@ -20,7 +21,7 @@ struct Material {
     reflectivity: f64,
 }
 
-trait Hittable {
+trait Hittable: Send + Sync {
     fn hit(&self, ray: &Ray) -> Option<(f64, Vec3, Vec3, Material)>;
 }
 
@@ -196,8 +197,6 @@ fn main() {
     // =======================================================
     let num_frames = 600;
     for frame in 0..num_frames {
-        let mut img = RgbImage::new(width, height);
-
         // --- DYNAMIC MOVEMENT SETUP ---
         let progress = frame as f64 / num_frames as f64;
         let camera_angle = progress * 2.0 * (2.0 * PI);
@@ -244,31 +243,34 @@ fn main() {
         let vertical = viewport_height * v;
         let lower_left_corner = lookfrom - horizontal / 2.0 - vertical / 2.0 - w;
 
-        // --- RENDER LOOP ---
+        // --- RENDER LOOP (parallel scanlines) ---
         println!("\nRendering frame {} of {}...", frame + 1, num_frames);
-        for y in 0..height {
-            let percent = (y as f64 / (height - 1) as f64) * 100.0;
-            eprint!("\r> {:.2}% complete", percent);
-            io::stderr().flush().unwrap();
 
-            for x in 0..width {
-                let s = x as f64 / (width - 1) as f64;
-                let t = (height - 1 - y) as f64 / (height - 1) as f64;
-                let ray_direction = (lower_left_corner + s * horizontal + t * vertical - lookfrom).normalize();
-                let ray = Ray { origin: lookfrom, direction: ray_direction };
-                let pixel_color = trace_ray(&ray, &scene, 5);
-                img.put_pixel(x, y, Rgb([
-                    (pixel_color.x.clamp(0.0, 1.0) * 255.0) as u8,
-                    (pixel_color.y.clamp(0.0, 1.0) * 255.0) as u8,
-                    (pixel_color.z.clamp(0.0, 1.0) * 255.0) as u8,
-                ]));
-            }
-        }
+        let bar = ProgressBar::new(height as u64);
+        bar.set_style(ProgressStyle::default_bar()
+            .template("{spinner:.green} [{elapsed_precise}] [{bar:40.cyan/blue}] {pos}/{len} ({eta})")
+            .unwrap()
+            .progress_chars("#>-"));
+
+        let pixels: Vec<u8> = (0..height).into_par_iter()
+            .progress_with(bar)
+            .flat_map(|y| {
+                (0..width).flat_map(|x| {
+                    let s = x as f64 / (width - 1) as f64;
+                    let t = (height - 1 - y) as f64 / (height - 1) as f64;
+                    let ray_direction = (lower_left_corner + s * horizontal + t * vertical - lookfrom).normalize();
+                    let ray = Ray { origin: lookfrom, direction: ray_direction };
+                    let pixel_color = trace_ray(&ray, &scene, 5);
+                    [(pixel_color.x.clamp(0.0, 1.0) * 255.0) as u8, (pixel_color.y.clamp(0.0, 1.0) * 255.0) as u8, (pixel_color.z.clamp(0.0, 1.0) * 255.0) as u8]
+                }).collect::<Vec<u8>>()
+            }).collect();
+
+        let img: RgbImage = ImageBuffer::from_raw(width, height, pixels).expect("Could not create image from pixel buffer");
 
         // --- SAVE THE FRAME ---
         let filename = format!("output/frame_{:03}.png", frame);
-        eprintln!("\nSaving frame to {}", filename);
-        img.save(filename).expect("Failed to save image.");
+        println!("Frame render complete. Saving to {}...", filename);
+        img.save(&filename).expect("Failed to save image.");
     }
     // --- END OF ANIMATION LOOP ---
 
