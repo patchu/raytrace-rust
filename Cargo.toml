@@ -2,9 +2,24 @@
 name = "raytrace"
 version = "0.1.0"
 edition = "2021"
-
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+default-run = "three_shinys"
 
 [dependencies]
 nalgebra = "0.32"
 image = "0.25"
+rayon = "1.10"
+indicatif = { version = "0.17", features = ["rayon"] }
+metal = { version = "0.28", optional = true }
+
+[[bin]]
+name = "three_shinys"
+path = "src/main.rs"
+
+[[bin]]
+name = "hot_wheels"
+path = "src/hot_wheels.rs"
+
+[[bin]]
+name = "metal_gradient"
+path = "src/metal_gradient.rs"
+required-features = ["metal"]
